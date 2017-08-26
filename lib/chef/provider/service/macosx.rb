@@ -52,17 +52,18 @@ class Chef
           @plist_size = 0
           @plist = @new_resource.plist ? @new_resource.plist : find_service_plist
           @service_label = find_service_label
-          # LauchAgents should be loaded as the console user.
+          # LaunchAgents should be loaded as the console user.
           @console_user = @plist ? @plist.include?("LaunchAgents") : false
           @session_type = @new_resource.session_type
 
           if @console_user
-            @console_user = Etc.getlogin
+            @console_user = Etc.getpwuid(::File.stat("/dev/console").uid).name
             Chef::Log.debug("#{new_resource} console_user: '#{@console_user}'")
             cmd = "su "
             param = this_version_or_newer?("10.10") ? "" : "-l "
+            param = "-l " if this_version_or_newer?("10.12")
             @base_user_cmd = cmd + param + "#{@console_user} -c"
-            # Default LauchAgent session should be Aqua
+            # Default LaunchAgent session should be Aqua
             @session_type = "Aqua" if @session_type.nil?
           end
 
@@ -181,7 +182,7 @@ class Chef
         end
 
         def set_service_status
-          return if @plist == nil or @service_label.to_s.empty?
+          return if @plist.nil? || @service_label.to_s.empty?
 
           cmd = "launchctl list #{@service_label}"
           res = shell_out_as_user(cmd)
@@ -197,7 +198,7 @@ class Chef
               case line.downcase
               when /\s+\"pid\"\s+=\s+(\d+).*/
                 pid = $1
-                @current_resource.running(!pid.to_i.zero?)
+                @current_resource.running(pid.to_i != 0)
                 Chef::Log.debug("Current PID for #{@service_label} is #{pid}")
               end
             end
@@ -236,7 +237,7 @@ class Chef
           plists = PLIST_DIRS.inject([]) do |results, dir|
             edir = ::File.expand_path(dir)
             entries = Dir.glob(
-              "#{edir}/*#{Chef::Util::PathHelper.escape_glob(@current_resource.service_name)}*.plist"
+              "#{edir}/*#{Chef::Util::PathHelper.escape_glob_dir(@current_resource.service_name)}*.plist"
             )
             entries.any? ? results << entries : results
           end
